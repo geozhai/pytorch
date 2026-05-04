@@ -9,7 +9,7 @@ from torch._inductor.ir import Pointwise
 from torch._inductor.lowering import make_fallback, make_pointwise, register_lowering
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.virtualized import ops
-from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
+from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CPU,
@@ -119,8 +119,12 @@ class TestCustomLowering(InductorTestCase):
         cls.impl_meta.impl("tanh_approx", tanh_approx_meta)
 
         def tanh_approx_lowering(inp):
-            fn = partial(ops.inline_asm_elementwise, asm="tanh.approx.f32 $0, $1;")
-            return make_pointwise(fn)(inp)
+            if torch.version.hip:
+                # AMD doesn't have a hardware tanh instruction, use portable tanh instead
+                return make_pointwise(ops.tanh)(inp)
+            else:
+                fn = partial(ops.inline_asm_elementwise, asm="tanh.approx.f32 $0, $1;")
+                return make_pointwise(fn)(inp)
 
         register_lowering(
             torch.ops.test_inductor_ops.tanh_approx, type_promotion_kind=None
@@ -218,7 +222,6 @@ class TestCustomLowering(InductorTestCase):
         )
 
     @requires_gpu()
-    @skipIfRocm
     @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
     @skipIf(GPU_TYPE == "mps", "Not applicable to MPS")
     def test_tanh_approx(self):
